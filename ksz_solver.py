@@ -1,6 +1,7 @@
 import jax
 from jax import numpy as jnp
 import numpy as np
+from numpy import newaxis
 from scipy.optimize import minimize, NonlinearConstraint
 
 # voters pick one of the choices per vote, and assign value to their choice.
@@ -66,34 +67,35 @@ class TensorPacker:
 
     def __init__(self, shapes, np=np):
         self.np = np
-        self.shapes = parts
+        self.shapes = shapes
         self.length = sum([np.product(shape) for shape in shapes])
 
     def pack(self, parts):
-        return self.np.concatenate(parts)
+        return self.np.concatenate([part.ravel() for part in parts])
 
     def unpack(self, x):
         res = []
         start = 0
         for shape in self.shapes:
             l = np.product(shape)
-            res.append(x[start : start+l])
+            res.append(x[start : start+l].reshape(shape))
             start += l
         return res
         
 
 class Solver:  # solve for s,z,k given p,t
     __slots__ = ('preference', 'power', 'Nv', 'Nq',
-            '_ksz_packer', '_ktsz_constraint_packer')
+            '_ksz_packer', '_kstz_constraint_packer')
 
     def __init__(self, preference, power):
         self.preference = preference
         self.power = power
-        Nv, Nq = preference.shape
+        Nv, Nq, two = preference.shape
+        assert two==2
         self.Nv = Nv
         self.Nq = Nq
         assert self.power.shape == (Nv, )
-        self._ksz_packer = TensorPacker((Nq, 2), (Nv,), (Nq,)) 
+        self._ksz_packer = TensorPacker(((Nq, 2), (Nv,), (Nq,)))
         self._kstz_constraint_packer = TensorPacker(((Nq,2), (Nv,), (Nv,), (Nq,)))
 
     def _constraint_func(self, x):
@@ -112,8 +114,14 @@ class Solver:  # solve for s,z,k given p,t
 
     def _loss(self, x):
         k,s,z = self._ksz_packer.unpack(x)
+        assert s.shape == (self.Nv,)
+        assert k.shape == (self.Nq,2)
+        assert z.shape == (self.Nq,)
         w = s[:,newaxis,newaxis] * self.preference
-        return z.dot(w[:,:,0].sum() - w[:,:,1].sum())
+        assert w.shape == (self.Nv, self.Nq, 2)
+        loss = z.dot(w[:,:,0].sum(0) - w[:,:,1].sum(0))
+        assert not isinstance(loss, np.ndarray) or np.isscalar(loss)
+        return loss
 
     def solve(self):
         Nv, Nq = self.Nv, self.Nq
@@ -124,6 +132,9 @@ class Solver:  # solve for s,z,k given p,t
         upper_bounds = self._kstz_constraint_packer.pack((Zk, np.full_like(Zs, np.inf), Zt, np.full_like(Zz,1)))
         constraints_jacobian = jax.jacobian(self._constraint_func)
         constraints = NonlinearConstraint(self._constraint_func, lower_bounds, upper_bounds, constraints_jacobian)
-        return minimize(self._loss, x0, method='trust-constr', jac=jax.grad(self._loss), constraints = constraints)
+        x0 = self._ksz_packer.pack((np.full_like(Zk, 0.5), np.ones((Nv,)), np.full_like(Zz, 0.5)))
+        result = minimize(self._loss, x0, method='trust-constr', jac=jax.grad(self._loss), constraints = constraints)
+        k,s,z = self._ksz_packer.unpack(result.x)
+        return (k,s,z), result 
 
 
