@@ -1,5 +1,7 @@
+import jax
 from jax import numpy as jnp
-from jax.numpy import newaxis
+import numpy as np
+from scipy.optimize import minimize, NonlinearConstraint
 
 # voters pick one of the choices per vote, and assign value to their choice.
 # the system calculates the winning choice per vote
@@ -41,13 +43,13 @@ from jax.numpy import newaxis
 # 
 # w[v,q,c] = s[v] * p[v,q,c]   # value (weight)
 # h[q,c] = c*z[q] + (1-c)(1-z[q])   # soft assignment of winner
-# y[v,q,c] = h[k,c]*k[q,c]*w[v,q,c]   # payment by voter v for choice c in question q
+# y[v,q] = sum(h[k,c]*k[q,c]*w[v,q,c], over c)   # payment by voter v for winning on question q
 #
 # hard constraints:
-#   0 <= z[q] <= 1
+#   0 == k[q,c] * w[:,q,c].sum() - w[:,q,1-c].sum()    # k equals weight ratio
 #   0 <= s[v]
-#   t[v] == y[v,:,:].sum()    # power equals sum of payments
-#   k[q,c] * w[:,q,c].sum() = w[:,q,1-c].sum()    # k equals weight ratio
+#   0 == t[v] - y[v].sum()    # power equals sum of payments
+#   0 <= z[q] <= 1
 # 
 # loss function:
 #   # we want if w[:,q,c] > w[:,q,1-c] then h[q,c] = 1
@@ -59,20 +61,69 @@ from jax.numpy import newaxis
 # if h[q,1] = 1 we say that choice 1 was selected
 
 
-def loss(s, z, k, preference, power):
-    """
-    let there by Nv voters and Nq questions.
-    input shapes:
-        s: (Nv,)
-        z: (Nq,)
-        k: (Nq,2)
-        preference: (Nv, Nq, 2)
-        power: (Nv,)
-    """
-    w = s[:,newaxis,newaxis] * preference
-    
+class TensorPacker:
+    __slots__ = ('shapes', 'length', 'np')
+
+    def __init__(self, shapes, np=np):
+        self.np = np
+        self.shapes = parts
+        self.length = sum([np.product(shape) for shape in shapes])
+
+    def pack(self, parts):
+        return self.np.concatenate(parts)
+
+    def unpack(self, x):
+        res = []
+        start = 0
+        for shape in self.shapes:
+            l = np.product(shape)
+            res.append(x[start : start+l])
+            start += l
+        return res
+        
+
+class Solver:  # solve for s,z,k given p,t
+    __slots__ = ('preference', 'power', 'Nv', 'Nq',
+            '_ksz_packer', '_ktsz_constraint_packer')
+
+    def __init__(self, preference, power):
+        self.preference = preference
+        self.power = power
+        Nv, Nq = preference.shape
+        self.Nv = Nv
+        self.Nq = Nq
+        assert self.power.shape == (Nv, )
+        self._ksz_packer = TensorPacker((Nq, 2), (Nv,), (Nq,)) 
+        self._kstz_constraint_packer = TensorPacker(((Nq,2), (Nv,), (Nv,), (Nq,)))
+
+    def _constraint_func(self, x):
+        k,s,z = self._ksz_packer.unpack(x)
+        w = s[:,newaxis,newaxis] * self.preference
+        w_sums = w.sum(axis=0)
+        h = jnp.hstack(((1-z),z))
+        y = (k*h*w).sum(axis=2)
+        
+        return self._kstz_constraint_packer.pack((
+            k * w_sums - w_sums.flip(1), # k equals the ratio of w_sums
+            s, # s is non-negative
+            t - y.sum(1), # power equals the sum of payments
+            z, # 0<=z<=1
+            ))
+
+    def _loss(self, x):
+        k,s,z = self._ksz_packer.unpack(x)
+        w = s[:,newaxis,newaxis] * self.preference
+        return z.dot(w[:,:,0].sum() - w[:,:,1].sum())
+
+    def solve(self):
+        Nv, Nq = self.Nv, self.Nq
+        Zk = np.zeros((Nq, 2)) 
+        Zs = Zt = np.zeros((Nv,))
+        Zz = np.zeros((Nq,))
+        lower_bounds = self._kstz_constraint_packer.pack((Zk, Zs, Zt, Zz))
+        upper_bounds = self._kstz_constraint_packer.pack((Zk, np.full_like(Zs, np.inf), Zt, np.full_like(Zz,1)))
+        constraints_jacobian = jax.jacobian(self._constraint_func)
+        constraints = NonlinearConstraint(self._constraint_func, lower_bounds, upper_bounds, constraints_jacobian)
+        return minimize(self._loss, x0, method='trust-constr', jac=jax.grad(self._loss), constraints = constraints)
 
 
-class VotersState:
-    __slots__ = ['power', 'preference']
-	
