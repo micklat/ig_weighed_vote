@@ -82,6 +82,10 @@ class TensorPacker:
         return res
         
 
+def h_from_z(z, np=np):
+    return np.vstack(((1-z),z)).T
+
+
 class Solver:  # solve for s,z,k given p,t
     __slots__ = ('preference', 'power', 'Nv', 'Nq',
             '_ksz_packer', '_kstz_constraint_packer')
@@ -101,7 +105,7 @@ class Solver:  # solve for s,z,k given p,t
         k,s,z = self._ksz_packer.unpack(x)
         w = s[:,newaxis,newaxis] * self.preference
         w_sums = w.sum(axis=0)
-        h = jnp.vstack(((1-z),z)).T
+        h = h_from_z(z, jnp)
         y = (k*h*w).sum(axis=2)
         
         return self._kstz_constraint_packer.pack((
@@ -111,7 +115,7 @@ class Solver:  # solve for s,z,k given p,t
             z, # 0<=z<=1
             ), jnp)
 
-    def _loss(self, x):
+    def loss(self, x):
         k,s,z = self._ksz_packer.unpack(x)
         assert s.shape == (self.Nv,)
         assert k.shape == (self.Nq,2)
@@ -132,8 +136,8 @@ class Solver:  # solve for s,z,k given p,t
         constraints_jacobian = jax.jit(jax.jacobian(self._constraint_func))
         constraints = NonlinearConstraint(self._constraint_func, lower_bounds, upper_bounds, constraints_jacobian)
         x0 = self._ksz_packer.pack((np.full_like(Zk, 0.5), np.ones((Nv,)), np.full_like(Zz, 0.5)), np)
-        loss_grad = jax.jit(jax.grad(self._loss))
-        result = minimize(self._loss, x0, method='trust-constr', jac=loss_grad, constraints = constraints)
+        loss_grad = jax.jit(jax.grad(self.loss))
+        result = minimize(self.loss, x0, jac=loss_grad, constraints = constraints, method="trust-constr")
         k,s,z = self._ksz_packer.unpack(result.x)
         return (k,s,z), result 
 
