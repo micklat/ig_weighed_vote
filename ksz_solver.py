@@ -3,6 +3,7 @@ from jax import numpy as jnp
 import numpy as np
 from numpy import newaxis
 from scipy.optimize import minimize, NonlinearConstraint
+from tensor_packer import TensorPacker
 
 # voters pick one of the choices per vote, and assign value to their choice.
 # the system calculates the winning choice per vote
@@ -62,26 +63,6 @@ from scipy.optimize import minimize, NonlinearConstraint
 # if h[q,1] = 1 we say that choice 1 was selected
 
 
-class TensorPacker:
-    __slots__ = ('shapes', 'length')
-
-    def __init__(self, shapes):
-        self.shapes = shapes
-        self.length = sum([np.product(shape) for shape in shapes])
-
-    def pack(self, parts, np):
-        return np.concatenate([part.ravel() for part in parts])
-
-    def unpack(self, x):
-        res = []
-        start = 0
-        for shape in self.shapes:
-            l = np.product(shape)
-            res.append(x[start : start+l].reshape(shape))
-            start += l
-        return res
-        
-
 def h_from_z(z, np=np):
     return np.vstack(((1-z),z)).T
 
@@ -115,8 +96,11 @@ class Solver:  # solve for s,z,k given p,t
             z, # 0<=z<=1
             ), jnp)
 
-    def loss(self, x):
+    def packed_loss(self, x):
         k,s,z = self._ksz_packer.unpack(x)
+        return self.ksz_loss(k, s, z)
+
+    def ksz_loss(self, k, s, z):
         assert s.shape == (self.Nv,)
         assert k.shape == (self.Nq,2)
         assert z.shape == (self.Nq,)
@@ -136,9 +120,37 @@ class Solver:  # solve for s,z,k given p,t
         constraints_jacobian = jax.jit(jax.jacobian(self._constraint_func))
         constraints = NonlinearConstraint(self._constraint_func, lower_bounds, upper_bounds, constraints_jacobian)
         x0 = self._ksz_packer.pack((np.full_like(Zk, 0.5), np.ones((Nv,)), np.full_like(Zz, 0.5)), np)
-        loss_grad = jax.jit(jax.grad(self.loss))
-        result = minimize(self.loss, x0, jac=loss_grad, constraints = constraints, method="trust-constr")
+        loss_grad = jax.jit(jax.grad(self.packed_loss))
+        result = minimize(self.packed_loss, x0, jac=loss_grad, constraints = constraints, method="trust-constr")
         k,s,z = self._ksz_packer.unpack(result.x)
         return (k,s,z), result 
 
+    def wrap_projections(self, x, projections):
+        k,s,z = self._ksz_packer.unpack(x)
+        for projection in projections:
+            k,s,z = projection(k,s,z)
+        return self._ksz_packer.pack((k,s,z), np)
 
+    def project_z(self, k, s, z):
+        z = (z>0.5).astype(float)
+        return k, s, z
+
+    def project_s(self, k, s, z):
+        h = h_from_z(z, np)
+        weighed_preference = (k*h*self.preference).sum(2).sum(1)
+        positive = (weighed_preference > 0)
+        s[positive] = self.power[positive] / weighed_preference[positive]
+        return k, s, z
+
+    def project_k(self, k, s, z):
+        w = s[:,newaxis, newaxis] * self.preference
+        w_sums = w.sum(0)
+        flipped = np.flip(w_sums, 1)
+        positive = (flipped > 0)
+        k[positive] = w_sums[positive] / flipped[positive]
+        return k, s, z
+
+    def sequential_projection(self, k, s, z):
+        for proj in (self.project_z, self.project_k, self.project_s):
+            k, s, z = proj(k, s, z)
+        return k, s, z
