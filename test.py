@@ -17,27 +17,33 @@ def show_violations(k, s, z, p, t):
     print("max_t_violation:", max_t_violation)
     print("max_k_violation:", max_k_violation)
 
+
+def uniform_random_case(rng, Nv, Nq):
+    power = np.full((Nv,), Nq*20)
+    preference = rng.integers(0, 10, (Nv, Nq, 2))
+    preference -= np.amin(preference, 2)[:,:,np.newaxis]
+    return (preference, power)
+
+
+def full_report(loss, k, s, z, opt_result, preference, power, dt):
+    print(f"loss: {loss}")
+    print(f"time: {dt} seconds")
+    print('preference diff:', preference[:,:,1]-preference[:,:,0])
+    print('k:', k)
+    print('s:', s)
+    print('z:', z)
+    print('opt result:', opt_result)
+    show_violations(k, s, z, preference, power)
+
 class Test1(TestCase):
     def test_random(self):
         rng = default_rng(seed=1)
-        Nv = 10
-        Nq = 5
-        power = np.full((Nv,), Nq*20)
-        preference = rng.integers(0, 10, (Nv, Nq, 2))
-        preference -= np.amin(preference, 2)[:,:,np.newaxis]
+        preference, power = uniform_random_case(rng, 10, 5)
         start_time = time.perf_counter()
         solver = Solver(preference, power)
-        (k,s,z),result = solver.solve()
+        (k,s,z),opt_result = solver.solve()
         dt = time.perf_counter() - start_time
-        print(f"loss: {solver.loss(result.x)}")
-        print(f"time: {dt} seconds")
-        print('preference diff:', preference[:,:,1]-preference[:,:,0])
-        print('k:', k)
-        print('s:', s)
-        print('z:', z)
-        print('opt result:', result)
-        show_violations(k, s, z, preference, power)
-
+        full_report(solver.loss(opt_result.x), k, s, z, opt_result, preference, power, dt)
 
 if __name__ == '__main__':
     import pdb, traceback
