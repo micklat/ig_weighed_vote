@@ -4,6 +4,7 @@ from numpy.random import default_rng
 from unittest import TestCase
 import time
 
+
 def show_violations(k, s, z, p, t):
     w = s[:,np.newaxis,np.newaxis] * p
     h = h_from_z(z)
@@ -34,6 +35,7 @@ def full_report(loss, k, s, z, opt_result, preference, power, dt):
     print('z:', z)
     print('opt result:', opt_result)
     show_violations(k, s, z, preference, power)
+
 
 class Test1(TestCase):
     def test_random(self):
