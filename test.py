@@ -11,7 +11,9 @@ def show_violations(k, s, z, p, t):
     max_t_violation = max(np.abs(1-y.sum(1)/t))
     total_s_violation = np.maximum(-s, 0).sum()
     max_k_violation = (abs(k * w.sum(0) - np.flip(w,2).sum(0))).max()
+    total_z_violation = np.maximum(-z, 0).sum() + np.maximum(z-1, 0).sum()
     print("total_s_violation:", total_s_violation)
+    print("total_z_violation:", total_z_violation)
     print("max_t_violation:", max_t_violation)
     print("max_k_violation:", max_k_violation)
 
