@@ -129,10 +129,10 @@ class Solver:  # solve for s,z,k given p,t
         Zz = np.zeros((Nq,))
         lower_bounds = self._kstz_constraint_packer.pack((Zk, Zs, Zt, Zz), np)
         upper_bounds = self._kstz_constraint_packer.pack((Zk, np.full_like(Zs, np.inf), Zt, np.full_like(Zz,1)), np)
-        constraints_jacobian = jax.jacobian(self._constraint_func)
+        constraints_jacobian = jax.jit(jax.jacobian(self._constraint_func))
         constraints = NonlinearConstraint(self._constraint_func, lower_bounds, upper_bounds, constraints_jacobian)
         x0 = self._ksz_packer.pack((np.full_like(Zk, 0.5), np.ones((Nv,)), np.full_like(Zz, 0.5)), np)
-        result = minimize(self._loss, x0, method='trust-constr', jac=jax.grad(self._loss), constraints = constraints)
+        result = minimize(self._loss, x0, method='trust-constr', jac=jax.jit(jax.grad(self._loss)), constraints = constraints)
         k,s,z = self._ksz_packer.unpack(result.x)
         return (k,s,z), result 
 
