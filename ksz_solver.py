@@ -63,15 +63,14 @@ from scipy.optimize import minimize, NonlinearConstraint
 
 
 class TensorPacker:
-    __slots__ = ('shapes', 'length', 'np')
+    __slots__ = ('shapes', 'length')
 
-    def __init__(self, shapes, np=np):
-        self.np = np
+    def __init__(self, shapes):
         self.shapes = shapes
         self.length = sum([np.product(shape) for shape in shapes])
 
-    def pack(self, parts):
-        return self.np.concatenate([part.ravel() for part in parts])
+    def pack(self, parts, np):
+        return np.concatenate([part.ravel() for part in parts])
 
     def unpack(self, x):
         res = []
@@ -102,15 +101,15 @@ class Solver:  # solve for s,z,k given p,t
         k,s,z = self._ksz_packer.unpack(x)
         w = s[:,newaxis,newaxis] * self.preference
         w_sums = w.sum(axis=0)
-        h = jnp.hstack(((1-z),z))
+        h = jnp.vstack(((1-z),z)).T
         y = (k*h*w).sum(axis=2)
         
         return self._kstz_constraint_packer.pack((
-            k * w_sums - w_sums.flip(1), # k equals the ratio of w_sums
+            k * w_sums - jnp.flip(w_sums, 1), # k equals the ratio of w_sums
             s, # s is non-negative
-            t - y.sum(1), # power equals the sum of payments
+            self.power - y.sum(1), # power equals the sum of payments
             z, # 0<=z<=1
-            ))
+            ), jnp)
 
     def _loss(self, x):
         k,s,z = self._ksz_packer.unpack(x)
@@ -128,11 +127,11 @@ class Solver:  # solve for s,z,k given p,t
         Zk = np.zeros((Nq, 2)) 
         Zs = Zt = np.zeros((Nv,))
         Zz = np.zeros((Nq,))
-        lower_bounds = self._kstz_constraint_packer.pack((Zk, Zs, Zt, Zz))
-        upper_bounds = self._kstz_constraint_packer.pack((Zk, np.full_like(Zs, np.inf), Zt, np.full_like(Zz,1)))
+        lower_bounds = self._kstz_constraint_packer.pack((Zk, Zs, Zt, Zz), np)
+        upper_bounds = self._kstz_constraint_packer.pack((Zk, np.full_like(Zs, np.inf), Zt, np.full_like(Zz,1)), np)
         constraints_jacobian = jax.jacobian(self._constraint_func)
         constraints = NonlinearConstraint(self._constraint_func, lower_bounds, upper_bounds, constraints_jacobian)
-        x0 = self._ksz_packer.pack((np.full_like(Zk, 0.5), np.ones((Nv,)), np.full_like(Zz, 0.5)))
+        x0 = self._ksz_packer.pack((np.full_like(Zk, 0.5), np.ones((Nv,)), np.full_like(Zz, 0.5)), np)
         result = minimize(self._loss, x0, method='trust-constr', jac=jax.grad(self._loss), constraints = constraints)
         k,s,z = self._ksz_packer.unpack(result.x)
         return (k,s,z), result 

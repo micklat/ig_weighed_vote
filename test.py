@@ -9,11 +9,11 @@ class Test1(TestCase):
         power = np.full((Nv,), Nq*20)
         preference = np.random.randint(0, 10, (Nv, Nq, 2))
         (k,s,z),result = Solver(preference, power).solve()
-        print(preference)
-        print(k)
-        print(s)
-        print(z)
-        print(result)
+        print('preference:', preference)
+        print('k:', k)
+        print('s:', s)
+        print('z:', z)
+        print('opt result:', result)
 
 
 if __name__ == '__main__':
