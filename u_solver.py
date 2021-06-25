@@ -35,7 +35,7 @@ from tensor_packer import TensorPacker
 
 
 def uncontested(preference):
-    """A question is trivial if either choice has 0 support"""
+    """A question is uncontested if either choice has 0 support"""
     p_sum = preference.sum(0)
     unsupported_choices = (p_sum==0)
     any_unsupported = np.any(unsupported_choices, axis=1)
