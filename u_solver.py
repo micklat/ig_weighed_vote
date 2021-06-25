@@ -1,3 +1,28 @@
+# voters pick one of the choices per vote, and assign value to their choice.
+# the system calculates the winning choice per vote
+# the system distributes payoffs to voters according to their choices and values
+
+# preference - the initial value for the calculation, provided by voters per vote
+
+# goals:
+# - distribute benefits from votes fairly between voters
+# - the stronger the opposition to a winning choice, weaken the winners' weight in other votes
+
+# implementation:
+# - decisions are made according to weighed votes; the winning choice is the one with the highest total weight
+# - weights are adjusted according to payments
+# - the voter pays only when she wins
+# - the winnign voters pay in proportion to the strength of their support for the winning choice, and in 
+#    proportion to the strength of the opposition.
+
+# After convergence, what we want these to approximately hold:
+# power[voter] == payment[voter].sum()
+# winning_choice[vote] = argmax(w[:,vote,:].sum(over voters))
+# payment[voter, vote, choice] == w[voter,vote, choice] * w[:,vote,losing_choice].sum() / w[:,vote,winning_choice].sum()
+# w[voter] is proportional to preference[voter] 
+# 
+# where <w> is the weighed vote.
+
 from jax.config import config as jax_config
 jax_config.update("jax_enable_x64", True)
 
