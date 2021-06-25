@@ -9,12 +9,13 @@ from scipy.optimize import minimize, NonlinearConstraint, Bounds
 from tensor_packer import TensorPacker
 
 
-def trivial_questions(preference):
+def uncontested(preference):
     """A question is trivial if either choice has 0 support"""
     p_sum = preference.sum(0)
     unsupported_choices = (p_sum==0)
     any_unsupported = np.any(unsupported_choices, axis=1)
-    return any_unsupported
+    uncontested_choices = (np.diff(p_sum).squeeze(-1) > 0)[any_unsupported]
+    return any_unsupported, uncontested_choices
 
 def sum_of_squares(x):
     return x.dot(x)
@@ -39,7 +40,7 @@ def sum_of_squares(x):
 # 
 # intermediate variables
 #
-# s[v] = log(1+exp(l[v]))  # preference scaler
+# s[v] = log(110+exp(l[v]))  # preference scaler
 # w[v,q,c] = s[v] * p[v,q,c]  # weighed vote
 # ws[q,c] = w.sum(0)  # total weighed vote for each choice
 # m[q] = ws[q].diff()  # weighed votes margin
@@ -63,13 +64,14 @@ class JaxAPIs:
 
 
 class Solver:
-    __slots__ = ('preference', 'power', 'Nv', 'Nq', 'expit_sharpness')
+    __slots__ = ('preference', 'power', 'Nv', 'Nq', 'expit_sharpness', 'original_preference', 'uncontested_q', 'uncontested_c',
+            'trace')
 
-    def __init__(self, preference, power, sharpness=1):
-        trivial = trivial_questions(preference)
-        if np.any(trivial):
-            raise ValueError(f"Votes {np.where(trivial)[0]} are trivial. Trivial votes must be removed first.")
-        self.preference = preference
+    def __init__(self, preference, power, sharpness=1, trace=None):
+        self.trace = trace
+        self.uncontested_q, self.uncontested_c = uncontested(preference)
+        self.original_preference = preference
+        self.preference = preference = preference[:, ~self.uncontested_q]
         self.power = power
         self.expit_sharpness = sharpness
         Nv, Nq, two = preference.shape
@@ -88,8 +90,8 @@ class Solver:
         s = self.s_from_l(l, apis)  # [v]
         w = s[:,newaxis,newaxis] * self.preference
         ws = w.sum(0) # [q,c], sum of weighed votes per choice
-        z = apis.scipy.special.expit(self.expit_sharpness * np.diff(ws))  # soft decision
-        h = np.hstack((1-z,z))  # [q,c], choice-selection factor
+        z = apis.scipy.special.expit(self.expit_sharpness * np.diff(ws).squeeze(-1))  # soft decision
+        h = np.vstack((1-z,z)).T  # [q,c], choice-selection factor
         assert h.shape == (self.Nq, 2)
         hws = (h*w).sum(2)  # [v,q], weighed preference for the winning choice
         winner_support = hws.sum(0)  # [q], soft-winner support
@@ -97,11 +99,16 @@ class Solver:
         loser_support = total_support - winner_support
         k = loser_support / winner_support   # cost factor
         loss = sum_of_squares(self.power - hws.dot(k))
-        print(loss, s)
-        return locals()
+        results = locals()
+        if self.trace is not None:
+            self.trace.append(results)
+        return results
 
     def loss(self, l, apis=ScipyAPIs):
         return self.calculate(l, apis)['loss']
+
+    def no_contest(self):
+        return np.all(self.uncontested_q)
 
     def solve(self):
         Nv, Nq = self.Nv, self.Nq
@@ -109,3 +116,12 @@ class Solver:
         loss_grad = jax.jit(jax.grad(lambda x: self.loss(x, JaxAPIs)))
         result = minimize(self.loss, l0, jac=loss_grad)
         return self.s_from_l(result.x), result 
+
+    def decisions(self, l):
+        d = self.calculate(l)
+        decisions = np.zeros_like(self.uncontested_q)
+        decisions[self.uncontested_q] = self.uncontested_c
+        decisions[~self.uncontested_q] = (d['z']>0.5)
+        return decisions
+
+
