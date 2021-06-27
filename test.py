@@ -50,13 +50,10 @@ if __name__ == '__main__':
     else:
         import pylab
         pylab.figure(1)
-        maxx = d['raw_margins'].max()
-        minx = d['raw_margins'].min()
         pylab.xlabel('unweighed margin')
         pylab.ylabel('weighed margin')
         pylab.axhline(y=0, color='k')
         pylab.axvline(x=0, color='k')
-        pylab.plot([minx,maxx],[minx,maxx],'--')
         pylab.scatter(d['raw_margins'], d['margins'],s=20)
         pylab.show()
 
