@@ -30,7 +30,7 @@ import jax
 import numpy as np
 import scipy
 from numpy import newaxis
-from scipy.optimize import minimize, NonlinearConstraint, Bounds
+from scipy.optimize import minimize
 
 
 def uncontested(preference):
