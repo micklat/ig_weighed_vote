@@ -15,7 +15,7 @@
 # - the winnign voters pay in proportion to the strength of their support for the winning choice, and in 
 #    proportion to the strength of the opposition.
 
-# After convergence, what we want these to approximately hold:
+# After convergence, we want these to approximately hold:
 # power[voter] == payment[voter].sum()
 # winning_choice[vote] = argmax(w[:,vote,:].sum(over voters))
 # payment[voter, vote, choice] == w[voter,vote, choice] * w[:,vote,losing_choice].sum() / w[:,vote,winning_choice].sum()
@@ -56,18 +56,18 @@ def sum_of_squares(x):
 #
 # hyperparameters:
 #
-# r # decision sharpness coefficient (starts small and increases)
+# r # decision sharpness coefficient 
 #
 # optimization variables:
 #
-# l[v] # pre-scaler of preferences
+# l[v] # controls voter's preference scaler
 # 
 # intermediate variables
 #
-# s[v] = log(110+exp(l[v]))  # preference scaler
+# s[v] = log(1+exp(l[v]))  # preference scaler
 # w[v,q,c] = s[v] * p[v,q,c]  # weighed vote
 # ws[q,c] = w.sum(0)  # total weighed vote for each choice
-# m[q] = ws[q].diff()  # weighed votes margin
+# m[q] = ws[q].diff()  # weighed votes' margin
 # z[q] = expit(r * m[q])   # soft decision
 # h[q,c] = c*z[q] + (1-c)*(1-z[q]) = z[q]*(2c-1) + 1-c  # soft decision as choice mass
 # k[q] = ws[q].dot(1-h[q]) / ws[q].dot(h[q])  # soft ratio of losing weights to winning weights
