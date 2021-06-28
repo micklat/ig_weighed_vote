@@ -31,7 +31,6 @@ import numpy as np
 import scipy
 from numpy import newaxis
 from scipy.optimize import minimize, NonlinearConstraint, Bounds
-from tensor_packer import TensorPacker
 
 
 def uncontested(preference):
